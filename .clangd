@@ -1,0 +1,10 @@
+CompileFlags:
+  Add:
+    - "-std=c++23"
+    - "-g"
+    - "-O0"
+    - "-Wall"
+    - "-Wextra"
+    - "-Wpedantic"
+    - "-Wsign-conversion"
+    - "-Iheaders"
