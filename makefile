@@ -46,7 +46,7 @@ $(TARGET): $(OBJS)
 # Run with optional arguments:
 # make run ARGS="/path file1 file2 -i"
 run: build
-	./$(TARGET) $(ARGS) 8080 save_dir
+	./$(TARGET) $(ARGS)8080 data
 
 # Compile source files
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp | dirs

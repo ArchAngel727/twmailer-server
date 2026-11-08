@@ -1,4 +1,5 @@
 #include "../headers/cmd_manager.hpp"
+#include "../headers/data_manager.hpp"
 #include <arpa/inet.h>
 #include <asm-generic/socket.h>
 #include <cerrno>
@@ -20,6 +21,7 @@
 #include <string>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <system_error>
 #include <unistd.h>
 
 namespace fs = std::filesystem;
@@ -72,13 +74,17 @@ std::optional<int> parse_int(std::string_view str) {
 }
 
 std::optional<App> read_args(int argc, char *argv[]) {
+  // NOTE: Return if not enough args
   if (argc < 3) {
     return std::nullopt;
   }
 
   uint16_t port = 0;
   fs::path path;
+  std::string buffer;
+  buffer.reserve(4096);
 
+  // NOTE: Parse port
   auto parsed_int = parse_int(argv[1]);
 
   if (!parsed_int) {
@@ -93,19 +99,19 @@ std::optional<App> read_args(int argc, char *argv[]) {
 
   port = (uint16_t)*parsed_int;
 
-  try {
-    path = fs::path(argv[2]);
-  } catch (std::exception e) {
-    std::println(std::cerr, "{}", e.what());
+  // NOTE: Get cwd
+  std::error_code ec;
+  path = fs::absolute(argv[2], ec).lexically_normal();
+
+  if (ec) {
+    std::println(std::cerr, "Could not get cwd: {}", ec.message());
     return std::nullopt;
   }
 
-  std::string buffer;
-  buffer.reserve(4096);
-
+  // NOTE: Create new app instance
   return App{
       .port = port,
-      .dir = fs::path("/"),
+      .dir = path,
       .buffer = buffer,
   };
 }
@@ -275,18 +281,6 @@ void init_sig_handler() {
 
   sigaction(SIGINT, &sa, nullptr);
   sigaction(SIGTERM, &sa, nullptr);
-}
-
-std::vector<std::string> split_string(const std::string &str) {
-  std::vector<std::string> out;
-  std::istringstream iss(str);
-  std::string line;
-
-  while (std::getline(iss, line)) {
-    out.push_back(std::move(line));
-  }
-
-  return out;
 }
 
 int init_server(App &app) {
