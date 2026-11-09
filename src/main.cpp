@@ -1,5 +1,6 @@
 #include "../headers/cmd_manager.hpp"
 #include "../headers/data_manager.hpp"
+#include "../headers/helper_fn.hpp"
 #include <arpa/inet.h>
 #include <asm-generic/socket.h>
 #include <cerrno>
@@ -9,20 +10,21 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <exception>
 #include <filesystem>
+#include <format>
 #include <getopt.h>
 #include <iostream>
 #include <netinet/in.h>
 #include <optional>
 #include <print>
+#include <ranges>
 #include <signal.h>
-#include <sstream>
 #include <string>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <system_error>
 #include <unistd.h>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -160,6 +162,7 @@ std::optional<std::string> recv_line(int fd, std::string &buffer) {
 void register_cmds(CmdManager &cmd_manager) {
   cmd_manager.register_command(std::string("send"), [](int fd, App &app) {
     std::vector<std::string> lines;
+    std::string return_msg = "ERR";
 
     while (auto str = recv_line(fd, app.buffer)) {
       if (!str->empty()) {
@@ -167,21 +170,33 @@ void register_cmds(CmdManager &cmd_manager) {
           break;
         }
 
+        trim_string(*str);
         lines.push_back(std::move(*str));
       }
     }
 
-    for (auto &line : lines) {
-      std::println("{}", line);
+    std::string message = lines | std::views::drop(3) |
+                          std::views::join_with('\n') |
+                          std::ranges::to<std::string>();
+
+    Mail mail = Mail{
+        .from = lines[0],
+        .to = lines[1],
+        .subject = lines[2],
+        .message = message,
+    };
+
+    if (DataManager::write_mail(app.dir, mail)) {
+      return_msg = "OK";
     }
 
-    send_str(fd, "hello there, but still err\n");
+    send_str(fd, return_msg);
 
     return true;
   });
 
   cmd_manager.register_command(std::string("list"), [](int fd, App &app) {
-    std::string user;
+    std::string user, response_msg = "ERR";
 
     while (auto line = recv_line(fd, app.buffer)) {
       if (!line->empty()) {
@@ -190,16 +205,29 @@ void register_cmds(CmdManager &cmd_manager) {
       }
     }
 
-    std::println("Listing mail for user: '{}'", user);
+    auto mails = DataManager::list_mail_for_user(app.dir, user);
 
-    send_str(fd, "Message count: 0\naint got shit for you rn.");
+    if (!mails.has_value()) {
+      send_str(fd, response_msg);
+      return true;
+    }
+
+    response_msg = std::format("{}\n", mails->size());
+
+    for (auto [i, mail] : std::views::enumerate(*mails)) {
+      response_msg += std::format("{}: {}", i + 1, mail);
+    }
+
+    std::println("Sending response: '{}'", response_msg);
+
+    send_str(fd, response_msg);
 
     return true;
   });
 
   cmd_manager.register_command(std::string("read"), [](int fd, App &app) {
-    int msg_number;
-    std::string username;
+    size_t msg_number;
+    std::string user, response_msg = "ERR";
     std::vector<std::string> lines;
 
     while (auto line = recv_line(fd, app.buffer)) {
@@ -215,23 +243,47 @@ void register_cmds(CmdManager &cmd_manager) {
     auto parsed_int = parse_int(lines.at(1));
 
     if (!parsed_int) {
-      send_str(fd, "Err");
+      std::println(std::cerr, "Could not parse int");
+      send_str(fd, response_msg);
       return true;
     }
 
-    username = lines.at(0);
-    msg_number = *parsed_int;
+    user = lines.at(0);
+    msg_number = static_cast<size_t>(*parsed_int);
 
-    std::println("Username: '{}', msg_num: '{}'", username, msg_number);
+    auto mails = DataManager::list_mail_for_user(app.dir, user);
 
-    send_str(fd, "Sumimasen, ERR");
+    if (!mails.has_value()) {
+      std::println(std::cerr, "Could not get mails");
+      send_str(fd, response_msg);
+      return true;
+    }
+
+    if (msg_number == 0 || msg_number > mails->size()) {
+      std::println(std::cerr, "Invalid index: {}", msg_number);
+      send_str(fd, response_msg);
+      return true;
+    }
+
+    std::string mail_name = (*mails)[msg_number - 1];
+    auto mail = DataManager::get_mail_unserialized(app.dir, user, mail_name);
+
+    if (!mail.has_value()) {
+      std::println(std::cerr, "Invalid mail");
+      send_str(fd, response_msg);
+      return true;
+    }
+
+    response_msg = *mail;
+
+    send_str(fd, response_msg);
 
     return true;
   });
 
   cmd_manager.register_command(std::string("del"), [](int fd, App &app) {
-    int msg_number;
-    std::string username;
+    size_t msg_number;
+    std::string user, response_msg = "ERR";
     std::vector<std::string> lines;
 
     while (auto line = recv_line(fd, app.buffer)) {
@@ -251,10 +303,33 @@ void register_cmds(CmdManager &cmd_manager) {
       return true;
     }
 
-    username = lines.at(0);
-    msg_number = *parsed_int;
+    user = lines.at(0);
+    msg_number = static_cast<size_t>(*parsed_int);
 
-    std::println("Deleting message {} from user {}", msg_number, username);
+    auto mails = DataManager::list_mail_for_user(app.dir, user);
+
+    if (!mails.has_value()) {
+      std::println(std::cerr, "Could not get mails");
+      send_str(fd, response_msg);
+      return true;
+    }
+
+    if (msg_number == 0 || msg_number > mails->size()) {
+      std::println(std::cerr, "Invalid index: {}", msg_number);
+      send_str(fd, response_msg);
+      return true;
+    }
+
+    std::string mail_name = (*mails)[msg_number - 1];
+
+    if (!DataManager::delete_mail(app.dir, user, mail_name)) {
+      send_str(fd, response_msg);
+      std::println(std::cerr, "Failed to delete mail {} for user {}", mail_name,
+                   user);
+      return true;
+    }
+
+    std::println("Deleting message {} from user {}", msg_number, user);
 
     send_str(fd, "OK");
 

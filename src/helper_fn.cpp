@@ -12,3 +12,9 @@ std::vector<std::string> split_string(const std::string &str) {
 
   return out;
 }
+
+void trim_string(std::string &str) {
+  constexpr const char *to_remove = " \n\t\r";
+  str.erase(str.find_last_not_of(to_remove) + 1);
+  str.erase(0, str.find_first_not_of(to_remove));
+}

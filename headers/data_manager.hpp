@@ -15,10 +15,14 @@ typedef struct {
 namespace DataManager {
 bool init_dir(const fs::path &);
 
-std::optional<Mail> get_mail(const fs::path &, const std::string &,
-                             const std::string &filename);
-bool write_mail(Mail &);
-bool delete_mail(const std::string &);
+std::optional<Mail> get_mail_deserialized(const fs::path &, const std::string &,
+                                          const std::string &);
+std::optional<std::string> get_mail_unserialized(const fs::path &,
+                                                 const std::string &,
+                                                 const std::string &);
+bool write_mail(const fs::path &, Mail &);
+bool delete_mail(const fs::path &root, const std::string &user,
+                 const std::string &mail);
 
 std::optional<std::vector<std::string>> list_mail_for_user(const fs::path &,
                                                            const std::string &);

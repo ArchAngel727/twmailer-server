@@ -2,3 +2,4 @@
 #include <vector>
 
 std::vector<std::string> split_string(const std::string &);
+void trim_string(std::string &);

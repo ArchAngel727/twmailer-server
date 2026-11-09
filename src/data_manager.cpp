@@ -93,22 +93,39 @@ bool init_dir(const fs::path &path) {
   return true;
 }
 
-std::optional<Mail> get_mail(const fs::path &root, const std::string &user,
-                             const std::string &filename) {
+std::optional<std::string> get_mail_unserialized(const fs::path &root,
+                                                 const std::string &user,
+                                                 const std::string &filename) {
   fs::path path = root / user / filename;
   std::ifstream in(path, std::ios::binary);
 
   if (!in) {
+    std::println(std::cerr, "Could not open file {}", path.string());
     return std::nullopt;
   }
 
-  std::string data(std::istream_iterator<char>(in), {});
+  // NOTE: read from start till end marker
+  std::string data((std::istreambuf_iterator<char>(in)),
+                   std::istreambuf_iterator<char>());
 
   if (in.bad()) {
+    std::println(std::cerr, "in was bad");
     return std::nullopt;
   }
 
-  return deserialize_mail(data);
+  return data;
+}
+
+std::optional<Mail> get_mail_deserialized(const fs::path &root,
+                                          const std::string &user,
+                                          const std::string &filename) {
+  auto data = get_mail_unserialized(root, user, filename);
+
+  if (!data.has_value()) {
+    return std::nullopt;
+  }
+
+  return deserialize_mail(*data);
 }
 
 bool write_mail(const fs::path &root, Mail &mail) {
@@ -116,11 +133,23 @@ bool write_mail(const fs::path &root, Mail &mail) {
   std::string str = serialize_mail(mail);
   std::error_code ec;
 
+  trim_string(filename);
+
+  fs::create_directory(root, ec);
+
+  if (ec) {
+    std::println(std::cerr, "Failed to create dir {}: {}", root.string(),
+                 ec.message());
+    return false;
+  }
+
   fs::path dir = root / mail.to;
 
   fs::create_directory(dir, ec);
 
   if (ec) {
+    std::println(std::cerr, "Failed to create dir {}: {}", dir.string(),
+                 ec.message());
     return false;
   }
 
@@ -175,7 +204,9 @@ list_mail_for_user(const fs::path &root, const std::string &user) {
   }
 
   for (const auto &entry : fs::directory_iterator(path)) {
-    mails.emplace_back(entry.path().filename().string());
+    auto mail = entry.path().filename().string();
+    trim_string(mail);
+    mails.push_back(std::move(mail));
   }
 
   return mails;
@@ -196,8 +227,3 @@ std::optional<std::vector<std::string>> list_users(const fs::path &root) {
 }
 
 }; // namespace DataManager
-/*
-  std::vector<Mail> mails;
-
-  return mails;
-  */
